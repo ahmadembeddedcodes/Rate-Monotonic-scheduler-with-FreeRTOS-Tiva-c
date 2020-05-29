@@ -4,7 +4,7 @@
 #define LATEST_ARRIVAL_TIME 15
 #define MAXIMUM_COMPUTATION_TIME 8
 #define MAXIMUM_PERIOD_MULTIPLER 17
-#define MODE SAFE_MODE
+#define MODE NO_GUARANTEE_MODE
 #define RAND_SEED 444
 
 #include <stdbool.h>
@@ -79,7 +79,7 @@ int cmp_period(const void* a, const void* b);
 int cmp_arrival(const void* a, const void* b);
 int cmp_delete(const void* a, const void* b);
 void float_split(float f, int *upper, int *lower, int decimals);
-void process_event(Task_Event* event);
+void process_event(Task_Event* event, unsigned int time_slice);
 void delete_task_data(task_data* task, task_data** task_array, unsigned n);
 void fix_task_priorities(task_data** task_array, unsigned int n);
 void print_data(task_data* x);
@@ -162,15 +162,21 @@ int main(void)
 void random_task(void *pvParameters) {
 	
 	TickType_t xLastWakeTime;
+	TickType_t xSecondWakeTime;
 	task_data* td = (task_data*)pvParameters;
 	int computation = (*td).computation_time;
 	int period  = (*td).period * 1000 * TST;
 	
 	for(;;){
 		xLastWakeTime = xTaskGetTickCount();
-		UARTprintf("%s is running\n", (*td).name);
+		UARTprintf("%s is running \n", (*td).name);
+		//xLastWakeTime = xTaskGetTickCount();
 		wait_1ms(computation * 1000 * TST);
+		//xSecondWakeTime = xTaskGetTickCount();
+		//UARTprintf("%s time taken %d\n", (*td).name, (xSecondWakeTime - xLastWakeTime));
 		UARTprintf("%s is blocking for reamining period\n", (*td).name);
+		//xSecondWakeTime = xTaskGetTickCount();
+		//UARTprintf("%s time taken %d\n", (*td).name, (xSecondWakeTime - xLastWakeTime));
 		vTaskDelayUntil( &xLastWakeTime, period / portTICK_RATE_MS);
 	}
 	
@@ -179,21 +185,23 @@ void random_task(void *pvParameters) {
 
 void monotonic_scheduler(void *pvParameters) {
 	
-	unsigned int time_slice = 0;
 	struct My_queue* arrival_events = ((Event_Queues*)pvParameters)->arrival_events;
 	struct My_queue* delete_events = ((Event_Queues*)pvParameters)->delete_events;
 	task_data** data = ((Event_Queues*)pvParameters)->data;
-	
+			
 	// -3 for our scheduler, idle and tmr svc tasks
 	unsigned int num_of_tasks = uxTaskGetNumberOfTasks() - 3;
+	unsigned int time_slice = 0;
+	
 	vTaskDelay((1000*TST) / portTICK_RATE_MS);
 	for(;;){
-		//UARTprintf("entering scheduler seconds: %d\n", time_slice);
+		//UARTprintf("entering scheduler seconds: %d\n", time_slice);				
+		time_slice++;
 		
 		Task_Event* arrival_event = (Task_Event*)front(arrival_events);
 		while(arrival_event != NULL && time_slice >= arrival_event->event_time) {
 			dequeue(arrival_events);
-			process_event(arrival_event);
+			process_event(arrival_event, time_slice);
 			vPortFree(arrival_event);
 			arrival_event = (Task_Event*)front(arrival_events);		
 		}
@@ -202,7 +210,7 @@ void monotonic_scheduler(void *pvParameters) {
 		while(delete_event != NULL && time_slice >= delete_event->event_time) {
 			
 			dequeue(delete_events);
-			process_event(delete_event);
+			process_event(delete_event, time_slice);
 			delete_task_data(delete_event->task, data, num_of_tasks);
 			vPortFree(delete_event);
 			
@@ -219,20 +227,19 @@ void monotonic_scheduler(void *pvParameters) {
 			delete_event = (Task_Event*)front(delete_events);		
 		}
 			
-		time_slice++;
 		vTaskDelay((1000*TST) / portTICK_RATE_MS);
 	}
 }
 
-void process_event(Task_Event* event) {
+void process_event(Task_Event* event, unsigned int time_slice) {
 	
 	TaskHandle_t handler = event->task->handler;
 	if(event->type == ARRIVAL){
-		UARTprintf("%s arrived\n", event->task->name);
+		UARTprintf("%s arrived at Time Slice %d\n", event->task->name, time_slice);
 		vTaskResume(handler);
 	}
 	else if(event->type == DELETE) {
-		UARTprintf("%s was deleted\n", event->task->name);
+		UARTprintf("%s was deleted at Time Slice %d\n", event->task->name, time_slice);
 		vTaskDelete(handler);
 	}
 }
@@ -288,7 +295,7 @@ void wait_1ms(unsigned long msec)
 	unsigned long count;
 	while (msec > 0)
 	{
-		count = 13000;
+		count = 8310;
 		while (count > 0)
 		{
 			count--;
